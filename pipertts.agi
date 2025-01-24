@@ -1,7 +1,7 @@
 #!/usr/bin/env perl
 
 #
-# AGI script that uses the SVOX Pico TTS text to speech engine.
+# AGI script that uses the SVOX Piper TTS text to speech engine.
 #
 # Copyright (C) 2015, Steven Mirabito <smirabito@csh.rit.edu>
 # Copyright (C) 2011 - 2015, Lefteris Zafiris <zaf.000@gmail.com>
@@ -13,21 +13,17 @@
 # -----
 # Usage
 # -----
-# agi(picotts.agi,"text",[language],[intkey],[speed]): This will invoke the Pico TTS
+# agi(pipertts.agi,"text",[model],[intkey],[speed]): This will invoke the Piper TTS
 # engine, render the text string to speech and play it back to the user.
 # If 'intkey' is set the script will wait for user input. Any given interrupt keys will
 # cause the playback to immediately terminate and the dialplan to proceed to the
 # matching extension (this is mainly for use in IVR, see README for examples).
 #
-# The script invokes PicoSpeaker in order to get the voice data,
-# which then stores in a local cache (by default /tmp/) for future use.
-#
-# Parameters like default language, sample rate, caching and cache dir
+# Parameters like default model, sample rate, caching and cache dir
 # can be set up by altering the following variables:
 #
-# Default langeuage: $lang
+# Default model:     $model
 # Speech rate:       $rate
-# Voice pitch:       $pitch
 # Chace:             $usecache
 # Chache directory:  $cachedir
 # SoX Version:       $sox_ver
@@ -45,8 +41,11 @@ $| = 1;
 # ----------------------------- #
 #   User defined parameters:    #
 # ----------------------------- #
-# Default language              #
-my $lang = "en-US";
+# Default model                 #
+my $model = "en_US-lessac-medium";
+
+# Default model location        #
+my $modeldir = "/opt/piper";
 
 # Output speed factor           #
 my $speed = 1;
@@ -76,7 +75,7 @@ my $fh;
 my $tmpname;
 my $fexten;
 my $sox;
-my $pico2wave;
+my $piper;
 my $intkey  = "";
 my $tmpdir  = "/tmp";
 my $maxlen  = 4096;
@@ -104,12 +103,12 @@ for ($AGI{arg_1}) {
 }
 my $lines = @text;
 
-# Setting language, interrupt keys and speed rate #
+# Setting model, interrupt keys and speed rate #
 if (length($AGI{arg_2})) {
-	if ($AGI{arg_2} =~ /^[a-zA-Z]{2}(-[a-zA-Z]{2,6})?$/) {
-		$lang = $AGI{arg_2};
+	if ($AGI{arg_2} =~ /^[a-zA-Z]{2}(_[a-zA-Z]{2,6})?(-[a-zA-Z]*)*$/) {
+		$model = $AGI{arg_2};
 	} else {
-		warn "$name Invalid language setting. Using default.\n";
+		warn "$name Invalid model setting. Using default.\n";
 	}
 }
 
@@ -158,11 +157,11 @@ for (my $i=0; $i < $lines; $i++) {
 	next if (length($line) == 0);
 	if ($debug) {
 		warn "$name Text passed for synthesis: $line\n",
-			"$name Language: $lang, Interrupt keys: $intkey, Sample rate: $samplerate\n",
+			"$name Model: $model, Interrupt keys: $intkey, Sample rate: $samplerate\n",
 			"$name Speed: $speed, Caching: $usecache, Cache dir: $cachedir\n";
 	}
 	if ($usecache) {
-		$filename = md5_hex("$line.$lang.$speed");
+		$filename = md5_hex("$line.$model.$speed");
 		# Stream file from cache if it exists #
 		if (-r "$cachedir/$filename.$fexten") {
 			warn "$name File already in cache.\n" if ($debug);
@@ -177,24 +176,24 @@ for (my $i=0; $i < $lines; $i++) {
 	$SIG{'INT'} = \&int_handler;
 	$SIG{'HUP'} = \&int_handler;
 
-	($fh, $tmpname) = tempfile("pico_XXXXXX", DIR => $tmpdir, UNLINK => 1);
+	($fh, $tmpname) = tempfile("piper_XXXXXX", DIR => $tmpdir, UNLINK => 1);
 	
 	# Detect required programs #
-	if (!$sox || !$pico2wave) {
+	if (!$sox || !$piper) {
 		$sox    = `/usr/bin/which sox`;
-		$pico2wave = `/usr/bin/which pico2wave`;
+		$piper = `/usr/bin/which piper`;
 		# Abort if required programs not found. #
-		die "$name sox or pico2wave is missing. Aborting.\n" if (!$sox || !$pico2wave);
-		chomp($sox, $pico2wave);
+		die "$name sox or piper is missing. Aborting.\n" if (!$sox || !$piper);
+		chomp($sox, $piper);
 	}
 	if (!$sox_ver) {
 		$sox_ver = (system("$sox --version > /dev/null 2>&1") == 0) ? 14 : 12;
-		warn "$name Found sox version $sox_ver in: $sox, pico2wave in: $pico2wave\n" if ($debug);
+		warn "$name Found sox version $sox_ver in: $sox, piper in: $piper\n" if ($debug);
 	}
 
 	# Convert text to speech and store it in a temporary file #
-	system($pico2wave, "-l", $lang, "-w", "$tmpname.wav", $line) == 0
-		or die "$name $pico2wave failed: $?\n";
+	system("/usr/bin/echo $line | $piper --model $modeldir/$model.onnx --output_file $tmpname.wav > /dev/null") == 0
+		or die "$name $piper failed: $?\n";
 	
 	# Convert wav file to 16bit 8Khz or 16kHz mono raw #
 	my @soxargs = get_sox_args("$tmpname.wav", "$tmpname.$fexten");
